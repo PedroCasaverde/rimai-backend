@@ -9,7 +9,7 @@ on:
 env:
   AWS_REGION: us-east-1
   # Pon aquí el NOMBRE EXACTO de tu repo en ECR que creaste en el Paso 5
-  ECR_REPOSITORY: whisper-backend-worker 
+  ECR_REPOSITORY: rimai-backend
 
 jobs:
   deploy:
