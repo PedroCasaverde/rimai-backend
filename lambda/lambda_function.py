@@ -45,6 +45,7 @@ def lambda_handler(event, context):
                             {
                                 'name': CONTAINER_NAME,
                                 'environment': [
+                                    {'name': 'HF_TOKEN', 'value': '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'},
                                     {'name': 'S3_INPUT_BUCKET', 'value': INPUT_BUCKET_NAME},
                                     {'name': 'S3_OUTPUT_BUCKET', 'value': OUTPUT_BUCKET_NAME},
                                     {'name': 'FILE_NAME', 'value': file_name},

@@ -1,21 +1,21 @@
-# Usamos una imagen ligera de Python
-FROM python:3.9-slim
+FROM python:3.10-slim
 
-# Instalar FFmpeg (necesario para audio) y git
+# Instalar dependencias del sistema
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Crear directorio de trabajo
 WORKDIR /app
 
-# Copiar requirements e instalar
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Instalar dependencias de Python
+RUN pip install --no-cache-dir \
+    torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118 \
+    openai-whisper \
+    pyannote.audio \
+    pydub \
+    boto3
 
-# Copiar el código
 COPY main.py .
 
-# Comando por defecto (se sobreescribe al lanzar el Job, pero dejamos este de base)
 CMD ["python", "main.py"]
