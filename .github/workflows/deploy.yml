@@ -1,4 +1,4 @@
-name: Deploy Whisper Worker to AWS ECR
+name: Deploy Rimai Backend
 
 on:
   push:
@@ -8,8 +8,10 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  # Pon aquí el NOMBRE EXACTO de tu repo en ECR que creaste en el Paso 5
-  ECR_REPOSITORY: rimai-backend
+  # NOMBRE DE TU REPO ECR (Verifica que sea este)
+  ECR_REPOSITORY: rimai-backend 
+  # NOMBRE DE TU LAMBDA (La que creamos manualmente)
+  FUNCTION_NAME: Rimai-Trigger-Job 
 
 jobs:
   deploy:
@@ -21,7 +23,6 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          # Estas keys deben estar en los Secrets de tu repositorio GitHub
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
@@ -30,17 +31,32 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build, tag, and push image to Amazon ECR
+      # --- PARTE 1: ACTUALIZAR EL DOCKER (Para AWS Batch) ---
+      - name: Build, tag, and push Docker image to Amazon ECR
         id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          # Usamos 'latest' para que AWS Batch siempre encuentre la versión nueva fácilmente
-          IMAGE_TAG: latest 
+          IMAGE_TAG: latest
         run: |
-          echo "🔨 Construyendo imagen Docker..."
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          
-          echo "🚀 Subiendo imagen a ECR..."
+          # Entramos a la carpeta docker/ para construir la imagen
+          # y la subimos con el tag :latest para que Batch la encuentre
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG ./docker
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          echo "Docker Image Pushed!"
+
+      # --- PARTE 2: ACTUALIZAR LA LAMBDA (El Manager) ---
+      - name: Zip and Update Lambda Function
+        run: |
+          # 1. Instalar zip si no está
+          sudo apt-get install zip -y
           
-          echo "✅ Imagen subida exitosamente: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          # 2. Crear un archivo zip con el contenido de la carpeta lambda/
+          # -j hace que no cree carpetas dentro del zip, solo el archivo
+          zip -j deploy.zip ./lambda/lambda_function.py
+          
+          # 3. Subir el zip a la Lambda
+          aws lambda update-function-code \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --zip-file fileb://deploy.zip
+            
+          echo "Lambda Updated!"
