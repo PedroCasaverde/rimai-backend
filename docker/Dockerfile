@@ -20,43 +20,45 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Actualizar pip y herramientas
+# Actualizar pip
 RUN pip3 install --upgrade pip setuptools wheel
 
-# 1. Instalar numpy primero (requerido por muchos paquetes)
-RUN pip3 install --no-cache-dir numpy==1.24.3
+# --- BLOQUE CRÍTICO: NUMPY ---
+# Forzamos NumPy menor a 2.0 antes que nada.
+# Esto evita que otras librerías intenten actualizarlo después.
+RUN pip3 install --no-cache-dir "numpy<2.0.0"
 
-# 2. Instalar PyTorch con CUDA
+# 1. Instalar PyTorch con CUDA (Compatible con NumPy 1.x)
 RUN pip3 install --no-cache-dir \
     torch==2.1.0 \
     torchvision==0.16.0 \
     torchaudio==2.1.0 \
     --index-url https://download.pytorch.org/whl/cu118
 
-# 3. Instalar dependencias de audio (antes de pyannote)
+# 2. Instalar dependencias de audio
 RUN pip3 install --no-cache-dir \
     librosa==0.10.1 \
     soundfile==0.12.1 \
     audioread==3.0.1 \
     scipy==1.11.4
 
-# 4. Instalar dependencias de pyannote una por una
-RUN pip3 install --no-cache-dir \
-    pyannote.core==5.0.0 \
-    pyannote.database==5.0.1 \
-    pyannote.metrics==3.2.1
-
-# 5. Instalar pyannote.audio (ahora debería funcionar)
+# 3. Instalar pyannote (Diarización)
+# Instalamos pandas explícitamente para evitar conflictos
+RUN pip3 install --no-cache-dir pandas<2.2.0 
 RUN pip3 install --no-cache-dir pyannote.audio==3.1.1
 
-# 6. Instalar Whisper
+# 4. Instalar Whisper
 RUN pip3 install --no-cache-dir openai-whisper==20231117
 
-# 7. Instalar utilidades restantes
+# 5. Instalar utilidades restantes
 RUN pip3 install --no-cache-dir \
     pydub==0.25.1 \
     boto3==1.34.34 \
     ffmpeg-python==0.2.0
+
+# 6. VERIFICACIÓN FINAL DE SEGURIDAD
+# Ejecutamos esto al final para asegurar que nada actualizó numpy a la versión 2
+RUN pip3 install --no-cache-dir "numpy<2.0.0" --force-reinstall
 
 # Copiar código
 COPY main.py .
