@@ -24,7 +24,6 @@ WORKDIR /app
 RUN pip3 install --upgrade pip setuptools wheel
 
 # 3. Instalar PyTorch COMPATIBLE con CUDA 11.8
-# Lo instalamos en un paso separado porque es muy pesado
 RUN pip3 install --no-cache-dir \
     torch==2.1.0 \
     torchvision==0.16.0 \
@@ -32,11 +31,11 @@ RUN pip3 install --no-cache-dir \
     --index-url https://download.pytorch.org/whl/cu118
 
 # 4. Instalar todas las librerías de IA y Audio
-# ¡IMPORTANTE!: Usamos comillas " " en las versiones con < para evitar error de sintaxis
+# ¡IMPORTANTE!: No borres las barras invertidas "\" al final de cada línea
 RUN pip3 install --no-cache-dir \
     "numpy<2.0.0" \
     "pandas<2.2.0" \
-    "huggingface_hub<0.22.0" \  <-- ¡ESTA ES LA LÍNEA NUEVA QUE NECESITAS!
+    "huggingface_hub<0.22.0" \
     librosa==0.10.1 \
     soundfile==0.12.1 \
     audioread==3.0.1 \
