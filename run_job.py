@@ -7,7 +7,7 @@ LAMBDA_URL = "https://gjdvwxf2a26ir3rsdsbgiomwdy0fbvlz.lambda-url.us-east-1.on.a
 
 # 2. CONFIGURA LOS DATOS DE PRUEBA
 # Este archivo TIENE que estar ya subido en tu bucket de entrada (S3)
-MI_VIDEO = "test_whisper.mp3" 
+MI_VIDEO = "test_cortazar.mp4" 
 MI_EMAIL = "casaverde.analitica@gmail.com"
 # ---------------------
 
