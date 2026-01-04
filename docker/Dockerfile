@@ -36,6 +36,7 @@ RUN pip3 install --no-cache-dir \
 RUN pip3 install --no-cache-dir \
     "numpy<2.0.0" \
     "pandas<2.2.0" \
+    "huggingface_hub<0.22.0" \  <-- ¡ESTA ES LA LÍNEA NUEVA QUE NECESITAS!
     librosa==0.10.1 \
     soundfile==0.12.1 \
     audioread==3.0.1 \
