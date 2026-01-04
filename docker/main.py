@@ -1,97 +1,82 @@
 import os
 import boto3
 import whisper
-import time
-from datetime import datetime
-from decimal import Decimal
+import torch # Importamos torch para verificar la GPU
 
-# Configuración de AWS (Las variables vendrán del entorno de AWS Batch)
-S3_BUCKET_INPUT = os.environ.get('S3_BUCKET_INPUT')
-S3_BUCKET_OUTPUT = os.environ.get('S3_BUCKET_OUTPUT')
-DYNAMODB_TABLE = os.environ.get('DYNAMODB_TABLE')
+# --- CONFIGURACIÓN ---
+# Estas variables vienen de las "Environment Variables" que configuramos en la Lambda
+S3_INPUT_BUCKET = os.environ.get('S3_INPUT_BUCKET')
+S3_OUTPUT_BUCKET = os.environ.get('S3_OUTPUT_BUCKET')
+FILE_NAME = os.environ.get('FILE_NAME')   # <--- OJO: En la Lambda usamos 'FILE_NAME'
+USER_EMAIL = os.environ.get('USER_EMAIL') # <--- Para usarlo en el reporte
 
 s3 = boto3.client('s3')
-dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(DYNAMODB_TABLE)
 
-def update_user_balance(username, duration_seconds, used_translation):
-    """
-    Descuenta el saldo en DynamoDB.
-    """
+def process_media():
+    print("🚀 Iniciando proceso de transcripción Rimai...")
+
+    # 0. Verificaciones de seguridad
+    if not S3_INPUT_BUCKET or not FILE_NAME:
+        print("❌ Error: Faltan variables de entorno.")
+        return
+
+    # 1. Preparar rutas
+    local_input_path = f"/tmp/{FILE_NAME}"
+    local_output_path = f"/tmp/{FILE_NAME}.txt"
+    s3_key_output = f"transcriptions/{FILE_NAME}.txt"
+
+    # 2. Descargar archivo de S3
+    print(f"⬇️ Descargando archivo: {FILE_NAME} desde {S3_INPUT_BUCKET}...")
     try:
-        # Preparamos la actualización
-        update_expr = "set transcription_balance_seconds = transcription_balance_seconds - :d"
-        expr_values = {':d': Decimal(str(duration_seconds))}
-        
-        if used_translation:
-            update_expr += ", translation_credits = translation_credits - :c"
-            expr_values[':c'] = 1
-
-        table.update_item(
-            Key={'username': username},
-            UpdateExpression=update_expr,
-            ExpressionAttributeValues=expr_values
-        )
-        print(f"✅ Saldo actualizado para {username}")
+        s3.download_file(S3_INPUT_BUCKET, FILE_NAME, local_input_path)
+        print("✅ Descarga completada.")
     except Exception as e:
-        print(f"❌ Error actualizando saldo: {e}")
+        print(f"❌ Error descargando de S3: {e}")
+        return
 
-def process_media(file_key, username, language_src, translate_target=None):
-    # 1. Descargar archivo
-    local_filename = "/tmp/" + file_key.split('/')[-1]
-    print(f"⬇️ Descargando {file_key}...")
-    s3.download_file(S3_BUCKET_INPUT, file_key, local_filename)
-
-    # 2. Cargar Whisper (Usamos 'medium' para balance calidad/velocidad)
-    print("🧠 Cargando modelo Whisper...")
-    model = whisper.load_model("medium") # O "large" si tienes buena GPU
-
-    # 3. Transcribir (Esto hace la magia)
-    print("🎙️ Transcribiendo...")
-    # task="translate" en whisper solo traduce a Inglés. 
-    # Si quieres custom, aquí iría la lógica extra de traducción.
-    result = model.transcribe(local_filename, language=language_src)
+    # 3. Cargar Whisper y verificar GPU
+    # Esto es vital para saber si AWS nos dio la tarjeta gráfica
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"🧠 Cargando modelo Whisper en dispositivo: {device.upper()} ...")
     
-    # Calcular duración real para cobro
-    duration = result['segments'][-1]['end'] if result['segments'] else 0
-    print(f"⏱️ Duración detectada: {duration} segundos")
+    try:
+        # Usamos 'medium' o 'small' para probar rápido. 'large-v2' para producción.
+        model = whisper.load_model("medium", device=device)
+    except Exception as e:
+        print(f"❌ Error cargando el modelo: {e}")
+        return
 
-    # 4. Formatear Salida (Simplificado)
-    output_text = f"REPORTE DE TRANSCRIPCIÓN\nUsuario: {username}\nDuración: {duration}s\n\n"
+    # 4. Transcribir
+    print("🎙️ Transcribiendo (esto puede tardar)...")
+    try:
+        result = model.transcribe(local_input_path)
+        transcribed_text = result['text']
+        print("✅ Transcripción finalizada.")
+    except Exception as e:
+        print(f"❌ Error durante la transcripción: {e}")
+        return
+
+    # 5. Crear reporte simple
+    reporte = f"""
+    --- REPORTE RIMAI ---
+    Video: {FILE_NAME}
+    Usuario: {USER_EMAIL}
+    Procesado en: {device}
+    ---------------------
     
-    for segment in result['segments']:
-        # Aquí simularíamos la diarización si usáramos WhisperX
-        # Por ahora Whisper nativo no separa interlocutores perfectamente sin ayuda externa
-        start = time.strftime('%H:%M:%S', time.gmtime(segment['start']))
-        text = segment['text']
+    {transcribed_text}
+    """
+
+    # 6. Guardar y Subir a S3 Output
+    print(f"⬆️ Subiendo resultados a {S3_OUTPUT_BUCKET}...")
+    try:
+        with open(local_output_path, "w", encoding="utf-8") as f:
+            f.write(reporte)
         
-        # Lógica de traducción simple (Ejemplo)
-        if translate_target:
-             # Aquí llamarías a tu librería de traducción (ej. deep_translator)
-             # text = traducir(text, translate_target)
-             output_text += f"[{start}] (TRADUCIDO): {text}\n"
-        else:
-             output_text += f"[{start}]: {text}\n"
-
-    # 5. Guardar y Subir
-    output_key = file_key + "_resultado.txt"
-    local_output = "/tmp/resultado.txt"
-    
-    with open(local_output, "w", encoding="utf-8") as f:
-        f.write(output_text)
-        
-    s3.upload_file(local_output, S3_BUCKET_OUTPUT, output_key)
-    print("✅ Archivo subido a S3 Output")
-
-    # 6. Cobrar al usuario
-    update_user_balance(username, duration, bool(translate_target))
+        s3.upload_file(local_output_path, S3_OUTPUT_BUCKET, s3_key_output)
+        print(f"🎉 ¡ÉXITO! Archivo disponible en: s3://{S3_OUTPUT_BUCKET}/{s3_key_output}")
+    except Exception as e:
+        print(f"❌ Error subiendo resultado: {e}")
 
 if __name__ == "__main__":
-    # Estos argumentos vendrán del Job de AWS Batch
-    # Se pasan como variables de entorno al contenedor
-    FILE_KEY = os.environ.get('FILE_KEY')
-    USERNAME = os.environ.get('USERNAME')
-    LANG_SRC = os.environ.get('LANG_SRC', 'es')
-    TRANSLATE_TO = os.environ.get('TRANSLATE_TO', '') # Vacío si no traduce
-
-    process_media(FILE_KEY, USERNAME, LANG_SRC, TRANSLATE_TO)
+    process_media()
