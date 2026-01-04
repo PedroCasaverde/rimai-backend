@@ -2,19 +2,20 @@ import json
 import boto3
 import os
 
-# --- CONFIGURACIÓN (Ajusta esto si tus nombres son diferentes) ---
+# --- CONFIGURACIÓN ---
 BATCH_JOB_QUEUE = 'Rimai-Queue'
 BATCH_JOB_DEFINITION = 'Rimai-Whisper-Job'
-INPUT_BUCKET_NAME = 'rimai-input-pibot' # <--- ¡CAMBIA ESTO POR TU NOMBRE REAL!
-OUTPUT_BUCKET_NAME = 'rimai-output-pibot' # <--- ¡CAMBIA ESTO POR TU NOMBRE REAL!
-# ---------------------------------------------------------------
+# ¡ASEGÚRATE DE QUE ESTOS NOMBRES SEAN LOS TUYOS!
+INPUT_BUCKET_NAME = 'rimai-input-pibot'  # <--- Revisa si es correcto
+OUTPUT_BUCKET_NAME = 'rimai-output-pibot' # <--- Revisa si es correcto
+CONTAINER_NAME = 'rimai-container' # <--- Este es el nombre que pusimos en la configuración
+# ---------------------
 
 batch = boto3.client('batch')
 
 def lambda_handler(event, context):
     try:
-        # 1. Recibir datos desde la Web (Frontend)
-        # Si viene desde API Gateway, el cuerpo suele venir en 'body' como string
+        # 1. Recibir datos
         if 'body' in event:
             body = json.loads(event['body'])
         else:
@@ -29,36 +30,38 @@ def lambda_handler(event, context):
                 'body': json.dumps('Error: Faltan datos (fileName o email)')
             }
 
-        print(f"🎬 Recibido trabajo para: {file_name}, usuario: {user_email}")
+        print(f"🎬 Recibido trabajo para: {file_name}")
 
-        # 2. Enviar la orden a AWS Batch (Encender la GPU)
+        # 2. Enviar orden a AWS Batch (MODO NUEVO ECS)
         response = batch.submit_job(
             jobName=f'transcribe-{file_name.replace(".", "-")}',
             jobQueue=BATCH_JOB_QUEUE,
             jobDefinition=BATCH_JOB_DEFINITION,
-            containerOverrides={
-                'environment': [
-                    {'name': 'S3_INPUT_BUCKET', 'value': INPUT_BUCKET_NAME},
-                    {'name': 'S3_OUTPUT_BUCKET', 'value': OUTPUT_BUCKET_NAME},
-                    {'name': 'FILE_NAME', 'value': file_name},
-                    {'name': 'USER_EMAIL', 'value': user_email}
+            # Aquí está el cambio clave para corregir tu error:
+            ecsPropertiesOverride={
+                'taskProperties': [
+                    {
+                        'containers': [
+                            {
+                                'name': CONTAINER_NAME,
+                                'environment': [
+                                    {'name': 'S3_INPUT_BUCKET', 'value': INPUT_BUCKET_NAME},
+                                    {'name': 'S3_OUTPUT_BUCKET', 'value': OUTPUT_BUCKET_NAME},
+                                    {'name': 'FILE_NAME', 'value': file_name},
+                                    {'name': 'USER_EMAIL', 'value': user_email}
+                                ]
+                            }
+                        ]
+                    }
                 ]
             }
         )
 
-        print(f"✅ Trabajo enviado a Batch! Job ID: {response['jobId']}")
+        print(f"✅ Trabajo enviado! Job ID: {response['jobId']}")
 
         return {
             'statusCode': 200,
-            'headers': {
-                "Access-Control-Allow-Origin": "*", # Importante para que funcione desde cualquier web
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "OPTIONS,POST"
-            },
-            'body': json.dumps({
-                'message': 'Trabajo iniciado correctamente',
-                'jobId': response['jobId']
-            })
+            'body': json.dumps({'message': 'Trabajo iniciado', 'jobId': response['jobId']})
         }
 
     except Exception as e:
