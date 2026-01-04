@@ -1,9 +1,9 @@
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
-# Evitar prompts interactivos durante la instalación
+# Evitar que Linux haga preguntas durante la instalación
 ENV DEBIAN_FRONTEND=noninteractive
 
-# 1. Instalar herramientas del sistema
+# 1. Instalar herramientas del sistema necesarias para audio y compilación
 RUN apt-get update && apt-get install -y \
     python3.10 \
     python3-pip \
@@ -20,20 +20,19 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# 2. Actualizar pip (vital para resolver dependencias modernas)
+# 2. Actualizar pip (vital para evitar errores de compilación)
 RUN pip3 install --upgrade pip setuptools wheel
 
-# 3. Instalar PyTorch (Versión compatible con CUDA 11.8)
-# Lo instalamos primero porque es el más pesado
+# 3. Instalar PyTorch COMPATIBLE con CUDA 11.8
+# Lo instalamos en un paso separado porque es muy pesado
 RUN pip3 install --no-cache-dir \
     torch==2.1.0 \
     torchvision==0.16.0 \
     torchaudio==2.1.0 \
     --index-url https://download.pytorch.org/whl/cu118
 
-# 4. Instalar Resto de Librerías (CON COMILLAS en las versiones < )
-# Agrupamos todo en un solo comando para que pip resuelva conflictos de una vez
-# Nota el uso de "numpy<2.0.0" para evitar el error de AttributeError
+# 4. Instalar todas las librerías de IA y Audio
+# ¡IMPORTANTE!: Usamos comillas " " en las versiones con < para evitar error de sintaxis
 RUN pip3 install --no-cache-dir \
     "numpy<2.0.0" \
     "pandas<2.2.0" \
@@ -47,8 +46,8 @@ RUN pip3 install --no-cache-dir \
     boto3==1.34.34 \
     ffmpeg-python==0.2.0
 
-# Copiar código
+# Copiar el código fuente
 COPY main.py .
 
-# Comando de ejecución
+# Comando de arranque
 CMD ["python3", "main.py"]
