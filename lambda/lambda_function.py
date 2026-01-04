@@ -2,20 +2,19 @@ import json
 import boto3
 import os
 
-# --- CONFIGURACIÓN ---
 BATCH_JOB_QUEUE = 'Rimai-Queue'
 BATCH_JOB_DEFINITION = 'Rimai-Whisper-Job'
-# ¡ASEGÚRATE DE QUE ESTOS NOMBRES SEAN LOS TUYOS!
-INPUT_BUCKET_NAME = 'rimai-input-pibot'  # <--- Revisa si es correcto
-OUTPUT_BUCKET_NAME = 'rimai-output-pibot' # <--- Revisa si es correcto
-CONTAINER_NAME = 'rimai-container' # <--- Este es el nombre que pusimos en la configuración
-# ---------------------
+INPUT_BUCKET_NAME = 'rimai-input-pibot'
+OUTPUT_BUCKET_NAME = 'rimai-output-pibot'
+CONTAINER_NAME = 'rimai-container'
+
+# Token de HuggingFace (¡IMPORTANTE! Configúralo en las variables de entorno de Lambda)
+HF_TOKEN = os.environ.get('HF_TOKEN', '')
 
 batch = boto3.client('batch')
 
 def lambda_handler(event, context):
     try:
-        # 1. Recibir datos
         if 'body' in event:
             body = json.loads(event['body'])
         else:
@@ -23,6 +22,7 @@ def lambda_handler(event, context):
 
         file_name = body.get('fileName')
         user_email = body.get('email')
+        language = body.get('language', 'auto')  # 'auto', 'es', 'en', 'fr', etc.
 
         if not file_name or not user_email:
             return {
@@ -30,14 +30,15 @@ def lambda_handler(event, context):
                 'body': json.dumps('Error: Faltan datos (fileName o email)')
             }
 
-        print(f"🎬 Recibido trabajo para: {file_name}")
+        print(f"🎬 Trabajo recibido: {file_name} (idioma: {language})")
 
-        # 2. Enviar orden a AWS Batch (MODO NUEVO ECS)
         response = batch.submit_job(
             jobName=f'transcribe-{file_name.replace(".", "-")}',
             jobQueue=BATCH_JOB_QUEUE,
             jobDefinition=BATCH_JOB_DEFINITION,
-            # Aquí está el cambio clave para corregir tu error:
+            timeout={
+                'attemptDurationSeconds': 7200  # 2 horas máximo
+            },
             ecsPropertiesOverride={
                 'taskProperties': [
                     {
@@ -45,11 +46,12 @@ def lambda_handler(event, context):
                             {
                                 'name': CONTAINER_NAME,
                                 'environment': [
-                                    {'name': 'HF_TOKEN', 'value': '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'},
                                     {'name': 'S3_INPUT_BUCKET', 'value': INPUT_BUCKET_NAME},
                                     {'name': 'S3_OUTPUT_BUCKET', 'value': OUTPUT_BUCKET_NAME},
                                     {'name': 'FILE_NAME', 'value': file_name},
-                                    {'name': 'USER_EMAIL', 'value': user_email}
+                                    {'name': 'USER_EMAIL', 'value': user_email},
+                                    {'name': 'LANGUAGE', 'value': language},
+                                    {'name': 'HF_TOKEN', 'value': HF_TOKEN}
                                 ]
                             }
                         ]
@@ -58,11 +60,15 @@ def lambda_handler(event, context):
             }
         )
 
-        print(f"✅ Trabajo enviado! Job ID: {response['jobId']}")
+        print(f"✅ Job ID: {response['jobId']}")
 
         return {
             'statusCode': 200,
-            'body': json.dumps({'message': 'Trabajo iniciado', 'jobId': response['jobId']})
+            'body': json.dumps({
+                'message': 'Trabajo iniciado',
+                'jobId': response['jobId'],
+                'language': language
+            })
         }
 
     except Exception as e:
