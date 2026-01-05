@@ -267,7 +267,7 @@ Hablantes detectados: {len(speakers_set)}
             f.write(json_output)
         s3.upload_file(local_json_path, S3_OUTPUT_BUCKET, s3_key_output_json)
         
-        print(f"🎉 ¡ÉXITO COMPLETO!")
+        print(f"🎉 ¡ÉXITO COMPLETO!!")
         
     except Exception as e:
         print(f"❌ Error subiendo: {e}")
