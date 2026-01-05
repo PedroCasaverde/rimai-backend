@@ -11,8 +11,7 @@ S3_INPUT_BUCKET = os.environ.get('S3_INPUT_BUCKET')
 S3_OUTPUT_BUCKET = os.environ.get('S3_OUTPUT_BUCKET')
 FILE_NAME = os.environ.get('FILE_NAME')
 USER_EMAIL = os.environ.get('USER_EMAIL')
-LANGUAGE = os.environ.get('LANGUAGE', 'auto')  # 'auto', 'es', 'en', 'fr', etc.
-
+LANGUAGE = os.environ.get('LANGUAGE', 'auto')
 HF_TOKEN = os.environ.get('HF_TOKEN')
 
 s3 = boto3.client('s3')
@@ -36,7 +35,6 @@ def detect_language(audio_path, device):
     print("🌍 Detectando idioma del audio...")
     try:
         model = whisper.load_model("medium", device=device)
-        # Transcribir solo los primeros 30 segundos para detectar idioma
         audio = whisper.load_audio(audio_path)
         audio = whisper.pad_or_trim(audio)
         mel = whisper.log_mel_spectrogram(audio).to(device)
@@ -67,7 +65,7 @@ def diarize_audio(audio_path, device):
         
         diarization = pipeline(
             audio_path,
-            min_speakers=2,
+            min_speakers=1, # Cambiado a 1 por seguridad
             max_speakers=10
         )
         
@@ -79,7 +77,8 @@ def diarize_audio(audio_path, device):
                 'speaker': speaker
             })
         
-        print(f"✅ Diarización completada. {len(set([s['speaker'] for s in segments]))} hablantes detectados")
+        num_speakers = len(set([s['speaker'] for s in segments]))
+        print(f"✅ Diarización completada. {num_speakers} hablantes detectados")
         return segments
         
     except Exception as e:
@@ -93,25 +92,25 @@ def transcribe_with_whisper(audio_path, device, language='auto'):
     try:
         model = whisper.load_model("large-v3", device=device)
         
-        # Si el idioma es 'auto', primero lo detectamos
         if language == 'auto':
             language = detect_language(audio_path, device)
         
-        # Configuración según idioma
+        # --- AQUÍ ESTÁ EL CAMBIO IMPORTANTE ANTI-BUCLE ---
         transcribe_options = {
             "word_timestamps": True,
             "verbose": True,
             "beam_size": 5,
             "best_of": 5,
-            "temperature": 0.0,
+            # Permitimos que varíe la temperatura si se atasca
+            "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
             "fp16": True,
-            "condition_on_previous_text": True,
+            # ¡CRÍTICO! Desactivar esto evita que repita "vosotros" infinitamente
+            "condition_on_previous_text": False, 
             "compression_ratio_threshold": 2.4,
             "logprob_threshold": -1.0,
             "no_speech_threshold": 0.6
         }
         
-        # Solo especificar idioma si no es 'auto'
         if language != 'auto':
             transcribe_options["language"] = language
         
@@ -128,11 +127,15 @@ def transcribe_with_whisper(audio_path, device, language='auto'):
 def merge_diarization_and_transcription(transcription, diarization):
     """Combina la transcripción con los hablantes identificados"""
     if not diarization:
-        return transcription['text']
+        return [{'speaker': 'SPEAKER_00', 'text': transcription['text'], 'start': 0, 'end': 0}]
     
     print("🔗 Fusionando transcripción con hablantes...")
     
     segments_with_words = []
+    # Whisper a veces no devuelve 'segments' si falla algo, protegemos eso
+    if 'segments' not in transcription:
+         return [{'speaker': 'ERROR', 'text': 'Error en transcripción interna', 'start': 0, 'end': 0}]
+
     for segment in transcription['segments']:
         segments_with_words.append({
             'start': segment['start'],
@@ -145,6 +148,7 @@ def merge_diarization_and_transcription(transcription, diarization):
         seg_middle = (seg['start'] + seg['end']) / 2
         
         speaker = "SPEAKER_UNKNOWN"
+        # Buscamos qué locutor estaba hablando en el punto medio de esta frase
         for d in diarization:
             if d['start'] <= seg_middle <= d['end']:
                 speaker = d['speaker']
@@ -161,8 +165,8 @@ def merge_diarization_and_transcription(transcription, diarization):
 
 def format_output(merged_data, is_structured=True):
     """Formatea la salida para lectura humana"""
-    if isinstance(merged_data, str):
-        return merged_data
+    if not merged_data: return ""
+    if isinstance(merged_data, str): return merged_data
     
     if not is_structured:
         return json.dumps(merged_data, indent=2, ensure_ascii=False)
@@ -172,29 +176,28 @@ def format_output(merged_data, is_structured=True):
     current_text = []
     
     for item in merged_data:
-        speaker = item['speaker']
-        text = item['text']
+        speaker = item.get('speaker', 'UNKNOWN')
+        text = item.get('text', '')
         
         if speaker != current_speaker:
             if current_speaker:
-                output.append(f"{current_speaker}: {' '.join(current_text)}\n")
+                # Escribimos el bloque anterior
+                output.append(f"\n[{current_speaker}]: {' '.join(current_text)}")
             current_speaker = speaker
             current_text = [text]
         else:
             current_text.append(text)
     
+    # Escribir el último bloque
     if current_speaker:
-        output.append(f"{current_speaker}: {' '.join(current_text)}\n")
+        output.append(f"\n[{current_speaker}]: {' '.join(current_text)}")
     
     return '\n'.join(output)
 
 def process_media():
     print("🚀 Iniciando proceso de transcripción Rimai con diarización...")
     print(f"📊 GPU disponible: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        print(f"   Modelo: {torch.cuda.get_device_name(0)}")
-        print(f"   Memoria: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
-
+    
     if not S3_INPUT_BUCKET or not FILE_NAME:
         print("❌ Error: Faltan variables de entorno.")
         return
@@ -209,40 +212,48 @@ def process_media():
     print(f"⬇️ Descargando: {FILE_NAME}...")
     try:
         s3.download_file(S3_INPUT_BUCKET, FILE_NAME, local_input_path)
-        print("✅ Descarga completada")
     except Exception as e:
         print(f"❌ Error descargando: {e}")
         return
 
     if not convert_to_wav(local_input_path, local_wav_path):
-        print("⚠️ No se pudo convertir, intentando con archivo original...")
         local_wav_path = local_input_path
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"🖥️ Usando: {device.upper()}")
-
+    
+    # 1. Diarización
     diarization = diarize_audio(local_wav_path, device)
+    
+    # 2. Transcripción
     transcription = transcribe_with_whisper(local_wav_path, device, LANGUAGE)
     
     if not transcription:
+        print("❌ Falló la transcripción.")
         return
 
+    # 3. Fusión
     merged = merge_diarization_and_transcription(transcription, diarization)
+    
+    # 4. Resultados
     formatted_text = format_output(merged, is_structured=True)
     json_output = format_output(merged, is_structured=False)
 
     detected_language = transcription.get('language', LANGUAGE)
-    num_speakers = len(set([s['speaker'] for s in merged])) if isinstance(merged, list) else 'N/A'
-
+    
+    # Contamos hablantes únicos
+    speakers_set = set()
+    if isinstance(merged, list):
+        for m in merged:
+            if 'speaker' in m: speakers_set.add(m['speaker'])
+            
     reporte_txt = f"""
 --- REPORTE RIMAI ---
 Archivo: {FILE_NAME}
 Usuario: {USER_EMAIL}
 Idioma: {detected_language.upper()}
 Procesado en: {device.upper()}
-Hablantes: {num_speakers}
+Hablantes detectados: {len(speakers_set)}
 ---------------------
-
 {formatted_text}
 """
 
@@ -256,9 +267,7 @@ Hablantes: {num_speakers}
             f.write(json_output)
         s3.upload_file(local_json_path, S3_OUTPUT_BUCKET, s3_key_output_json)
         
-        print(f"🎉 ¡ÉXITO!")
-        print(f"   TXT: s3://{S3_OUTPUT_BUCKET}/{s3_key_output_txt}")
-        print(f"   JSON: s3://{S3_OUTPUT_BUCKET}/{s3_key_output_json}")
+        print(f"🎉 ¡ÉXITO COMPLETO!")
         
     except Exception as e:
         print(f"❌ Error subiendo: {e}")
