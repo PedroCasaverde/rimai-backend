@@ -13,7 +13,7 @@ FILE_NAME = os.environ.get('FILE_NAME')
 USER_EMAIL = os.environ.get('USER_EMAIL')
 LANGUAGE = os.environ.get('LANGUAGE', 'auto')
 HF_TOKEN = os.environ.get('HF_TOKEN')
-
+NUM_SPEAKERS_ENV = os.environ.get('NUM_SPEAKERS', None)
 s3 = boto3.client('s3')
 
 def convert_to_wav(input_path, output_path):
@@ -49,7 +49,7 @@ def detect_language(audio_path, device):
         return "es"
 
 def diarize_audio(audio_path, device):
-    """Identifica quién habla y cuándo"""
+    """Identifica quién habla y cuándo (Dinámico)"""
     print("👥 Iniciando diarización de hablantes...")
     
     if not HF_TOKEN:
@@ -63,11 +63,28 @@ def diarize_audio(audio_path, device):
         )
         pipeline.to(torch.device(device))
         
-        diarization = pipeline(
-            audio_path,
-            min_speakers=1, # Cambiado a 1 por seguridad
-            max_speakers=10
-        )
+        # --- LÓGICA DINÁMICA DE HABLANTES ---
+        diarization_params = {}
+        
+        # Si recibimos un número válido (ej: "1", "3"), lo forzamos.
+        # Si no recibimos nada (None o vacío), dejamos que Pyannote decida.
+        if NUM_SPEAKERS_ENV and NUM_SPEAKERS_ENV.isdigit() and int(NUM_SPEAKERS_ENV) > 0:
+            n_speakers = int(NUM_SPEAKERS_ENV)
+            print(f"🔒 Forzando detección a exactamente {n_speakers} hablantes.")
+            diarization_params = {
+                "min_speakers": n_speakers,
+                "max_speakers": n_speakers
+            }
+        else:
+            print("🔓 Modo Automático: Detectando cantidad de hablantes...")
+            # Opcional: poner límites lógicos para evitar alucinaciones extremas
+            diarization_params = {
+                "min_speakers": 1,
+                "max_speakers": 20
+            }
+
+        # Pasamos los parámetros con ** (desempaquetado de diccionario)
+        diarization = pipeline(audio_path, **diarization_params)
         
         segments = []
         for turn, _, speaker in diarization.itertracks(yield_label=True):
@@ -77,8 +94,8 @@ def diarize_audio(audio_path, device):
                 'speaker': speaker
             })
         
-        num_speakers = len(set([s['speaker'] for s in segments]))
-        print(f"✅ Diarización completada. {num_speakers} hablantes detectados")
+        num_speakers_detected = len(set([s['speaker'] for s in segments]))
+        print(f"✅ Diarización completada. {num_speakers_detected} hablantes encontrados.")
         return segments
         
     except Exception as e:
