@@ -4,10 +4,10 @@ import sys
 # --- CONFIGURACIÓN ---
 LAMBDA_URL = "https://gjdvwxf2a26ir3rsdsbgiomwdy0fbvlz.lambda-url.us-east-1.on.aws/"
 
-MI_VIDEO = "jorge_lozano_1.mp3"
+MI_VIDEO = "Tutorial_de_Claude_Code.mp3"
 MI_EMAIL = "casaverde.analitica@gmail.com"
 MI_IDIOMA = "es" # Opciones: 'auto', 'es', 'en', 'fr', 'de', 'it', 'pt', 'ja', 'zh', etc.
-MI_SPEAKERS = 2  
+MI_SPEAKERS = 1  
 # ---------------------
 
 def trigger_transcription(video=None, email=None, language=None, speakers=None):
