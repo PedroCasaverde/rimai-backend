@@ -2,7 +2,7 @@ FROM nvidia/cuda:12.3.2-cudnn9-runtime-ubuntu22.04
 
 # Evitar que Linux haga preguntas durante la instalación
 ENV DEBIAN_FRONTEND=noninteractive
-
+ENV PYTHONUNBUFFERED=1
 # 1. Instalar herramientas del sistema necesarias para audio y compilación
 #    - ffmpeg: requerido por pydub para convertir audio
 #    - libsndfile: requerido por librosa/soundfile
