@@ -60,3 +60,21 @@ jobs:
             --zip-file fileb://deploy.zip
             
           echo "Lambda Updated!"
+
+      - name: Clean up old ECR images
+        run: |
+          IMAGES_TO_DELETE=$(aws ecr describe-images \
+            --repository-name ${{ env.ECR_REPOSITORY }} \
+            --query 'sort_by(imageDetails,&imagePushedAt)[:-3].imageDigest' \
+            --output text)
+          
+          if [ -n "$IMAGES_TO_DELETE" ]; then
+            for digest in $IMAGES_TO_DELETE; do
+              aws ecr batch-delete-image \
+                --repository-name ${{ env.ECR_REPOSITORY }} \
+                --image-ids imageDigest=$digest
+            done
+            echo "Old images cleaned up"
+          else
+            echo "Nothing to clean up"
+          fi

@@ -4,7 +4,7 @@ import sys
 # --- CONFIGURACIÓN ---
 LAMBDA_URL = "https://gjdvwxf2a26ir3rsdsbgiomwdy0fbvlz.lambda-url.us-east-1.on.aws/"
 
-MI_VIDEO = "Clase-1-ML.mp4"
+MI_VIDEO = "Clase-2-ML.mp4"
 MI_EMAIL = "casaverde.analitica@gmail.com"
 MI_IDIOMA = "es" # Opciones: 'auto', 'es', 'en', 'fr', 'de', 'it', 'pt', 'ja', 'zh', etc.
 MI_SPEAKERS = 1  
