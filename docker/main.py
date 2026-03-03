@@ -98,7 +98,7 @@ def transcribe_with_whisper(audio_path, device, language='auto'):
         # CAMBIO: WhisperModel en vez de whisper.load_model
         # compute_type="float16" equivale a fp16=True del original
         model = WhisperModel(
-            "large-v3-turbo",
+            "large-v3",
             device=device,
             compute_type="float16" if device == "cuda" else "int8"
         )
