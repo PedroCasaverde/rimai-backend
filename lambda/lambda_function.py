@@ -11,6 +11,17 @@ HF_TOKEN = os.environ.get('HF_TOKEN', '')
 
 batch = boto3.client('batch')
 
+def _validate_secret(event):
+    """Valida que el request viene de pibot-web"""
+    expected = os.environ.get('PIBOT_SECRET', '')
+    if not expected:
+        return True  # Si no está configurado, no bloquear (dev)
+    headers = event.get('headers', {})
+    # Lambda Function URL envía headers en minúsculas
+    received = headers.get('x-pibot-secret', '')
+    return received == expected
+
+
 def _validate_zoom_url(url):
     """Valida que la URL sea de zoom.us"""
     import re
@@ -277,6 +288,13 @@ def _get_request_path(event):
 
 def lambda_handler(event, context):
     try:
+        # Validar autenticación
+        if not _validate_secret(event):
+            return {
+                'statusCode': 401,
+                'body': json.dumps({'error': 'No autorizado'})
+            }
+
         path = _get_request_path(event)
 
         if 'body' in event:

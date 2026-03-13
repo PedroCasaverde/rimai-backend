@@ -370,11 +370,17 @@ def send_callback(callback_url, payload):
         return
 
     print(f"  📤 Enviando callback a: {callback_url}")
+
+    headers = {"Content-Type": "application/json"}
+    webhook_secret = os.environ.get('WEBHOOK_SECRET', '')
+    if webhook_secret:
+        headers["X-Webhook-Secret"] = webhook_secret
+
     try:
         resp = requests.post(
             callback_url,
             json=payload,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
             timeout=30,
         )
         print(f"  ✅ Callback enviado (status: {resp.status_code})")
