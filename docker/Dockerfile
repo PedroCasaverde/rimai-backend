@@ -54,9 +54,10 @@ RUN pip3 install --no-cache-dir \
 RUN pip3 install --no-cache-dir \
     PyMuPDF==1.24.0 \
     reportlab==4.1.0 \
-    openai==1.14.0 \
+    openai==1.57.0 \
+    httpx==0.27.2 \
     requests==2.31.0 \
-    yt-dlp==2024.3.10
+    yt-dlp
 
 # Copiar el código fuente
 COPY main.py mentoria.py ./
