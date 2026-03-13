@@ -1,10 +1,15 @@
 import os
+import time
 import boto3
 import torch
 from faster_whisper import WhisperModel
 from pyannote.audio import Pipeline
 from pydub import AudioSegment
 import json
+
+# --- COSTOS AWS (USD/hora, on-demand us-east-1) ---
+# Ajustar según la instancia real de tu Job Definition en AWS Batch
+AWS_BATCH_COST_PER_HOUR = float(os.environ.get('AWS_BATCH_COST_PER_HOUR', '1.006'))  # g5.xlarge default
 
 # --- CONFIGURACIÓN ---
 S3_INPUT_BUCKET = os.environ.get('S3_INPUT_BUCKET')
@@ -219,26 +224,74 @@ def format_output(merged_data, is_structured=True):
     
     return '\n'.join(output)
 
+def download_zoom_for_transcription():
+    """Descarga grabación de Zoom y retorna el nombre del archivo local"""
+    zoom_url = os.environ.get('ZOOM_URL', '')
+    if not zoom_url:
+        return None
+
+    print(f"🔗 Descargando grabación de Zoom...")
+    try:
+        from mentoria import download_zoom_video, upload_zoom_to_s3
+        local_path = download_zoom_video(zoom_url)
+        # Subir a S3 para consistencia
+        s3_key = upload_zoom_to_s3(local_path, S3_INPUT_BUCKET)
+        print(f"✅ Zoom descargado y subido como: {s3_key}")
+        return s3_key, local_path
+    except Exception as e:
+        print(f"❌ Error descargando Zoom: {e}")
+        return None
+
+
+def print_cost_summary(elapsed_seconds, gpu_name=""):
+    """Imprime resumen de recursos y costos estimados"""
+    elapsed_min = elapsed_seconds / 60
+    elapsed_hr = elapsed_seconds / 3600
+    batch_cost = elapsed_hr * AWS_BATCH_COST_PER_HOUR
+
+    print("\n" + "=" * 50)
+    print("💰 RESUMEN DE RECURSOS Y COSTOS")
+    print("=" * 50)
+    print(f"   Tiempo total:        {elapsed_min:.1f} min ({elapsed_seconds:.0f}s)")
+    if gpu_name:
+        print(f"   GPU utilizada:       {gpu_name}")
+    print(f"   Instancia Batch:     ${AWS_BATCH_COST_PER_HOUR:.3f}/hr")
+    print(f"   Costo Batch (GPU):   ${batch_cost:.4f}")
+    print(f"   Costo S3 (estimado): ~$0.0001")
+    print(f"   ─────────────────────────────")
+    print(f"   COSTO TOTAL ESTIMADO: ${batch_cost + 0.0001:.4f}")
+    print("=" * 50)
+
+
 def process_media():
+    job_start = time.time()
     print("🚀 Iniciando proceso de transcripción Rimai con diarización...")
     print(f"📊 GPU disponible: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"📊 GPU: {torch.cuda.get_device_name(0)}")
-    
-    if not S3_INPUT_BUCKET or not FILE_NAME:
-        print("❌ Error: Faltan variables de entorno.")
+
+    # Si viene una URL de Zoom, descargarla primero
+    zoom_result = download_zoom_for_transcription()
+    file_name = FILE_NAME
+
+    if zoom_result:
+        s3_key, _ = zoom_result
+        file_name = s3_key
+    elif not S3_INPUT_BUCKET or not file_name:
+        print("❌ Error: Faltan variables de entorno (FILE_NAME o ZOOM_URL).")
         return
 
-    local_input_path = f"/tmp/{FILE_NAME}"
-    local_wav_path = f"/tmp/{FILE_NAME}_converted.wav"
-    local_output_path = f"/tmp/{FILE_NAME}_transcription.txt"
-    local_json_path = f"/tmp/{FILE_NAME}_transcription.json"
-    s3_key_output_txt = f"transcriptions/{FILE_NAME}.txt"
-    s3_key_output_json = f"transcriptions/{FILE_NAME}.json"
+    local_input_path = f"/tmp/{os.path.basename(file_name)}"
+    base_name = os.path.basename(file_name)
+    local_wav_path = f"/tmp/{base_name}_converted.wav"
+    local_output_path = f"/tmp/{base_name}_transcription.txt"
+    local_json_path = f"/tmp/{base_name}_transcription.json"
+    s3_key_output_txt = f"transcriptions/{base_name}.txt"
+    s3_key_output_json = f"transcriptions/{base_name}.json"
 
-    print(f"⬇️ Descargando: {FILE_NAME}...")
+    print(f"⬇️ Descargando: {file_name}...")
     try:
-        s3.download_file(S3_INPUT_BUCKET, FILE_NAME, local_input_path)
+        s3.download_file(S3_INPUT_BUCKET, file_name, local_input_path)
     except Exception as e:
         print(f"❌ Error descargando: {e}")
         return
@@ -275,7 +328,7 @@ def process_media():
             
     reporte_txt = f"""
 --- REPORTE RIMAI ---
-Archivo: {FILE_NAME}
+Archivo: {file_name}
 Usuario: {USER_EMAIL}
 Idioma: {detected_language.upper()}
 Procesado en: {device.upper()}
@@ -296,9 +349,19 @@ Motor: Faster-Whisper large-v3 (VAD + CTranslate2)
         s3.upload_file(local_json_path, S3_OUTPUT_BUCKET, s3_key_output_json)
         
         print(f"🎉 ¡ÉXITO COMPLETO!!")
-        
+
     except Exception as e:
         print(f"❌ Error subiendo: {e}")
 
+    # Resumen de costos
+    gpu_name = torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"
+    print_cost_summary(time.time() - job_start, gpu_name)
+
 if __name__ == "__main__":
-    process_media()
+    job_type = os.environ.get('JOB_TYPE', 'transcription')
+
+    if job_type == 'mentoria':
+        from mentoria import process_mentoria
+        process_mentoria()
+    else:
+        process_media()

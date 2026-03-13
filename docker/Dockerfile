@@ -46,8 +46,20 @@ RUN pip3 install --no-cache-dir \
     pydub==0.25.1 \
     boto3==1.34.34
 
+# 5. Dependencias para MentorIA
+#    - PyMuPDF: extracción de texto de PDFs
+#    - reportlab: generación de PDFs de resultado
+#    - openai: API de GPT-4o-mini para generación de contenido
+#    - requests: para callbacks HTTP
+RUN pip3 install --no-cache-dir \
+    PyMuPDF==1.24.0 \
+    reportlab==4.1.0 \
+    openai==1.14.0 \
+    requests==2.31.0 \
+    yt-dlp==2024.3.10
+
 # Copiar el código fuente
-COPY main.py .
+COPY main.py mentoria.py ./
 
 # Comando de arranque
 CMD ["python3", "main.py"]
