@@ -54,7 +54,7 @@ def diarize_audio(audio_path, device):
     try:
         pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-3.1",
-            use_auth_token=HF_TOKEN
+            token=HF_TOKEN
         )
         pipeline.to(torch.device(device))
         
